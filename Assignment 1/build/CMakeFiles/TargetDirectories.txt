@@ -1,0 +1,3 @@
+/Users/dchottani/Desktop/RTA/Real-Time-Animation/Assignment 1/build/CMakeFiles/PlaneRotation.dir
+/Users/dchottani/Desktop/RTA/Real-Time-Animation/Assignment 1/build/CMakeFiles/edit_cache.dir
+/Users/dchottani/Desktop/RTA/Real-Time-Animation/Assignment 1/build/CMakeFiles/rebuild_cache.dir
