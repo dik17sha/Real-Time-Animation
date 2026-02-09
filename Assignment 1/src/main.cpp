@@ -44,12 +44,50 @@ void processInput(GLFWwindow *window);
 unsigned int loadCubemap(std::vector<std::string> faces);
 
 struct Keyframe {
-    float time;           // Time in seconds
-    glm::vec3 position;   // Where the plane is
-    glm::quat rotation;   // Where the plane is pointing
+    float time;           
+    glm::vec3 position;   
+    glm::quat rotation;   
 };
 
 std::vector<Keyframe> flightPath;
+
+void initFlightPath();
+
+bool autoPilot = false;
+glm::vec3 getInterpolatedPosition(float time) {
+    if (flightPath.empty()) return glm::vec3(0.0f);
+    
+    float totalTime = flightPath.back().time;
+    float currentTime = fmod(time, totalTime);
+
+    for (int i = 0; i < flightPath.size() - 1; i++) {
+        if (currentTime >= flightPath[i].time && currentTime <= flightPath[i+1].time) {
+            // Inside the 'for' loop after calculating float t:
+            float t = (currentTime - flightPath[i].time) / (flightPath[i+1].time - flightPath[i].time);
+
+            // Smoothstep formula: This makes the "sharp" turn feel deliberate and professional
+            t = t * t * (3.0f - 2.0f * t); 
+
+            // Now use this smoothed 't' for mix and slerp
+            return glm::mix(flightPath[i].position, flightPath[i+1].position, t);        }
+    }
+    return flightPath[0].position;
+}
+
+glm::quat getInterpolatedRotation(float time) {
+    if (flightPath.empty()) return glm::quat(1, 0, 0, 0);
+
+    float totalTime = flightPath.back().time;
+    float currentTime = fmod(time, totalTime);
+
+    for (int i = 0; i < flightPath.size() - 1; i++) {
+        if (currentTime >= flightPath[i].time && currentTime <= flightPath[i+1].time) {
+            float t = (currentTime - flightPath[i].time) / (flightPath[i+1].time - flightPath[i].time);
+            return glm::slerp(flightPath[i].rotation, flightPath[i+1].rotation, t);
+        }
+    }
+    return flightPath[0].rotation;
+}
 
 int main()
 {
@@ -87,6 +125,7 @@ int main()
     }
 
     glEnable(GL_DEPTH_TEST);
+    initFlightPath();
 
     Shader basicShader("shaders/basic.vert", "shaders/basic.frag");
     Shader phongShader("shaders/phong.vert", "shaders/phong.frag");
@@ -171,19 +210,36 @@ std::vector<std::string> faces {
         
         phongShader.use();
         glm::mat4 model = glm::mat4(1.0f);
-        model = glm::translate(model, glm::vec3(0.0f, -2.5f, 0.0f));
 
-        if (useQuaternions)
+        if (autoPilot) 
         {
-            glm::mat4 rotationMatrix = glm::mat4_cast(planeOrientation);
-            model = model * rotationMatrix;
-        }
+            // AUTOPILOT MODE
+            float time = glfwGetTime();
+            glm::vec3 currentPos = getInterpolatedPosition(time);
+            glm::quat currentRot = getInterpolatedRotation(time);
+
+            model = glm::translate(model, currentPos);
+            model *= glm::mat4_cast(currentRot);
+
+            //view = glm::lookAt(currentPos + glm::vec3(0,5,20), currentPos, glm::vec3(0, 1, 0));
+        }   
         else 
         {
-            model = glm::rotate(model, glm::radians(yaw),   glm::vec3(0.0f, 1.0f, 0.0f));
-            model = glm::rotate(model, glm::radians(pitch), glm::vec3(1.0f, 0.0f, 0.0f));
-            model = glm::rotate(model, glm::radians(roll),  glm::vec3(0.0f, 0.0f, 1.0f));
+            // MANUAL MODE
+            model = glm::translate(model, glm::vec3(0.0f, -2.5f, 0.0f));
 
+            if (useQuaternions)
+            {
+                // Manual Quaternion rotation
+                model = model * glm::mat4_cast(planeOrientation);
+            }
+            else 
+            {
+                // Manual Euler rotation (Demonstrates Gimbal Lock)
+                model = glm::rotate(model, glm::radians(yaw),   glm::vec3(0.0f, 1.0f, 0.0f));
+                model = glm::rotate(model, glm::radians(pitch), glm::vec3(1.0f, 0.0f, 0.0f));
+                model = glm::rotate(model, glm::radians(roll),  glm::vec3(0.0f, 0.0f, 1.0f));
+            }
         }
 
         model = glm::scale (model, glm::vec3(1.0f));
@@ -272,6 +328,13 @@ void processInput(GLFWwindow *window)
         pitch = 0.0f; yaw = 0.0f; roll = 0.0f;
         planeOrientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
     }
+
+    static bool pWasPressed = false;
+if (glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS && !pWasPressed) {
+    autoPilot = !autoPilot;
+    pWasPressed = true;
+}
+if (glfwGetKey(window, GLFW_KEY_P) == GLFW_RELEASE) pWasPressed = false;
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
@@ -346,4 +409,24 @@ unsigned int loadCubemap(std::vector<std::string> faces)
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
     return textureID;
+}
+
+void initFlightPath() {
+    flightPath.clear();
+    
+    // Keyframe 0: Center (Start)
+    flightPath.push_back({0.0f, glm::vec3(0, 5, 0), glm::quat(1, 0, 0, 0)});
+
+    // Keyframe 1: Wide Left Loop (Banking 45 degrees)
+    // We move further out (25 units) and give it more time (4s)
+    flightPath.push_back({4.0f, glm::vec3(-25, 10, -20), glm::angleAxis(glm::radians(45.0f), glm::vec3(0, 0, 1))});
+
+    // Keyframe 2: Back to Center
+    flightPath.push_back({8.0f, glm::vec3(0, 5, 0), glm::quat(1, 0, 0, 0)});
+
+    // Keyframe 3: Wide Right Loop (Banking -45 degrees)
+    flightPath.push_back({12.0f, glm::vec3(25, 10, 20), glm::angleAxis(glm::radians(-45.0f), glm::vec3(0, 0, 1))});
+
+    // Keyframe 4: Return to Start
+    flightPath.push_back({16.0f, glm::vec3(0, 5, 0), glm::quat(1, 0, 0, 0)});
 }
