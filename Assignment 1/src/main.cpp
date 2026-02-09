@@ -62,18 +62,19 @@ glm::vec3 getInterpolatedPosition(float time) {
 
     for (int i = 0; i < flightPath.size() - 1; i++) {
         if (currentTime >= flightPath[i].time && currentTime <= flightPath[i+1].time) {
-            // Inside the 'for' loop after calculating float t:
+            
             float t = (currentTime - flightPath[i].time) / (flightPath[i+1].time - flightPath[i].time);
 
-            // Smoothstep formula: This makes the "sharp" turn feel deliberate and professional
+            // smoothing formula 
             t = t * t * (3.0f - 2.0f * t); 
 
-            // Now use this smoothed 't' for mix and slerp
+            // mix and slerp
             return glm::mix(flightPath[i].position, flightPath[i+1].position, t);        }
     }
     return flightPath[0].position;
 }
 
+//the slerp thing 
 glm::quat getInterpolatedRotation(float time) {
     if (flightPath.empty()) return glm::quat(1, 0, 0, 0);
 
@@ -193,9 +194,9 @@ std::vector<std::string> faces {
         glm::mat4 view = camera.GetViewMatrix();
     
         // 1. DRAW SKYBOX
-        glDepthFunc(GL_LEQUAL); // Change depth function so depth test passes when values are equal to depth buffer's content
+        glDepthFunc(GL_LEQUAL); 
         basicShader.use();
-        // Remove translation from view matrix
+  
         glm::mat4 skyboxView = glm::mat4(glm::mat3(camera.GetViewMatrix())); 
         basicShader.setMat4("view", skyboxView);
         basicShader.setMat4("projection", projection);
@@ -230,12 +231,12 @@ std::vector<std::string> faces {
 
             if (useQuaternions)
             {
-                // Manual Quaternion rotation
+                // Quaternion rotation
                 model = model * glm::mat4_cast(planeOrientation);
             }
             else 
             {
-                // Manual Euler rotation (Demonstrates Gimbal Lock)
+                // Euler rotation (Demonstrates Gimbal Lock)
                 model = glm::rotate(model, glm::radians(yaw),   glm::vec3(0.0f, 1.0f, 0.0f));
                 model = glm::rotate(model, glm::radians(pitch), glm::vec3(1.0f, 0.0f, 0.0f));
                 model = glm::rotate(model, glm::radians(roll),  glm::vec3(0.0f, 0.0f, 1.0f));
@@ -243,7 +244,7 @@ std::vector<std::string> faces {
         }
 
         model = glm::scale (model, glm::vec3(1.0f));
-         // Scale down the model
+    
         phongShader.setMat4("projection", projection);
         phongShader.setMat4("view", view);
         phongShader.setMat4("model", model);
@@ -317,7 +318,7 @@ void processInput(GLFWwindow *window)
         if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)     yaw -= angle;
     }
 
-    // --- BASIC WASD CAMERA FUNCTIONALITY ---
+    // camera controls 
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camera.ProcessKeyboard(FORWARD, deltaTime);
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camera.ProcessKeyboard(BACKWARD, deltaTime);
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camera.ProcessKeyboard(LEFT, deltaTime);
@@ -376,8 +377,7 @@ unsigned int loadCubemap(std::vector<std::string> faces)
 
     int width, height, nrChannels;
     
-    // OpenGL cubemaps usually expect the top-left pixel first, 
-    // so we disable flipping for the cubemap load.
+    
     stbi_set_flip_vertically_on_load(false);
 
     for (unsigned int i = 0; i < faces.size(); i++)
@@ -385,7 +385,7 @@ unsigned int loadCubemap(std::vector<std::string> faces)
         unsigned char *data = stbi_load(faces[i].c_str(), &width, &height, &nrChannels, 0);
         if (data)
         {
-            // Handle PNG (RGBA) vs JPG (RGB) automatically
+            
             GLenum format = GL_RGB;
             if (nrChannels == 4)
                 format = GL_RGBA;
@@ -401,7 +401,7 @@ unsigned int loadCubemap(std::vector<std::string> faces)
         }
     }
 
-    // Set texture parameters for seamless edges and proper filtering
+    // Set texture parameters 
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
