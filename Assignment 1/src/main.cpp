@@ -1,9 +1,14 @@
+#define GLM_ENABLE_EXPERIMENTAL
 #include <iostream>
+#include<vector>
 #include <fstream>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtx/quaternion.hpp>
 
 #include "shader.h"
 #include "camera.h"
@@ -20,16 +25,31 @@ bool firstMouse = true;
 float deltaTime = 2.0f;	
 float lastFrame = 0.0f;
 
+
 float pitch = 0.0f;
 float yaw = 0.0f;
 float roll = 0.0f;
+
 float rotationSpeed = 50.0f; 
+
+glm::quat planeOrientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+
+bool useQuaternions = false;
+
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void mouse_callback(GLFWwindow* window, double xPos, double yPos);
 void scroll_callback(GLFWwindow* window, double xOffset, double yOffset);
 void processInput(GLFWwindow *window);
 unsigned int loadCubemap(std::vector<std::string> faces);
+
+struct Keyframe {
+    float time;           // Time in seconds
+    glm::vec3 position;   // Where the plane is
+    glm::quat rotation;   // Where the plane is pointing
+};
+
+std::vector<Keyframe> flightPath;
 
 int main()
 {
@@ -46,7 +66,7 @@ int main()
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "LearnOpenGL", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Plane Rotations", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -118,6 +138,14 @@ std::vector<std::string> faces {
 
         processInput(window);
 
+        std::string modeStr = useQuaternions ? "QUATERNION" : "EULER (Gimbal Lock Demo)";
+        std::string title = "PlaneRotation | Mode: " + modeStr + 
+                        " | Pitch: " + std::to_string((int)pitch % 360) + 
+                        " | Yaw: " + std::to_string((int)yaw % 360) + 
+                        " | Roll: " + std::to_string((int)roll % 360);
+
+        glfwSetWindowTitle(window, title.c_str());
+
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -144,13 +172,19 @@ std::vector<std::string> faces {
         phongShader.use();
         glm::mat4 model = glm::mat4(1.0f);
         model = glm::translate(model, glm::vec3(0.0f, -2.5f, 0.0f));
-        model = glm::rotate(model, glm::radians(30.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        model = glm::rotate(model, glm::radians(-10.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 
-        model = glm::rotate(model, glm::radians(yaw),   glm::vec3(0.0f, 1.0f, 0.0f));
-        model = glm::rotate(model, glm::radians(pitch), glm::vec3(1.0f, 0.0f, 0.0f));
-        model = glm::rotate(model, glm::radians(roll),  glm::vec3(0.0f, 0.0f, 1.0f));
+        if (useQuaternions)
+        {
+            glm::mat4 rotationMatrix = glm::mat4_cast(planeOrientation);
+            model = model * rotationMatrix;
+        }
+        else 
+        {
+            model = glm::rotate(model, glm::radians(yaw),   glm::vec3(0.0f, 1.0f, 0.0f));
+            model = glm::rotate(model, glm::radians(pitch), glm::vec3(1.0f, 0.0f, 0.0f));
+            model = glm::rotate(model, glm::radians(roll),  glm::vec3(0.0f, 0.0f, 1.0f));
 
+        }
 
         model = glm::scale (model, glm::vec3(1.0f));
          // Scale down the model
@@ -173,45 +207,71 @@ std::vector<std::string> faces {
 
 void processInput(GLFWwindow *window)
 {
+    // 1. ESCAPE TO CLOSE
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    // Calculate rotation amount based on time to keep it smooth
-    float currentRotation = rotationSpeed * deltaTime;
+    // Toggle Logic (Spacebar)
+    static bool spaceWasPressed = false;
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && !spaceWasPressed) {
+        useQuaternions = !useQuaternions;
+        spaceWasPressed = true;
+    }
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_RELEASE) spaceWasPressed = false;
 
-    // PITCH (X-Axis) - Arrow Up/Down
-    if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
-        pitch += currentRotation;
-    if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
-        pitch -= currentRotation;
+    float angle = rotationSpeed * deltaTime;
 
-    // YAW (Y-Axis) - Arrow Left/Right
-    if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
-        yaw += currentRotation;
-    if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
-        yaw -= currentRotation;
+    if (useQuaternions) {
+        // --- QUATERNION LOGIC (Resolves Gimbal Lock) ---
+        glm::quat deltaQuat = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
 
-    // ROLL (Z-Axis) - Q and E keys
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
-        roll += currentRotation;
-    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
-        roll -= currentRotation;
+        // Pitch (X-axis): Up/Down
+        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)
+            deltaQuat = glm::angleAxis(glm::radians(angle), glm::vec3(1.0f, 0.0f, 0.0f)) * deltaQuat;
+        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)
+            deltaQuat = glm::angleAxis(glm::radians(-angle), glm::vec3(1.0f, 0.0f, 0.0f)) * deltaQuat;
 
-    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
-        pitch = 0.0f;
-        yaw   = 0.0f;
-        roll  = 0.0f;
+        // Roll (Z-axis): Left/Right
+        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)
+            deltaQuat = glm::angleAxis(glm::radians(angle), glm::vec3(0.0f, 0.0f, 1.0f)) * deltaQuat;
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS)
+            deltaQuat = glm::angleAxis(glm::radians(-angle), glm::vec3(0.0f, 0.0f, 1.0f)) * deltaQuat;
+
+        // Yaw (Y-axis): Q/E
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)
+            deltaQuat = glm::angleAxis(glm::radians(angle), glm::vec3(0.0f, 1.0f, 0.0f)) * deltaQuat;
+        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)
+            deltaQuat = glm::angleAxis(glm::radians(-angle), glm::vec3(0.0f, 1.0f, 0.0f)) * deltaQuat;
+
+        planeOrientation = planeOrientation * deltaQuat;
+        planeOrientation = glm::normalize(planeOrientation);
+    } 
+    else {
+        // --- EULER LOGIC (Demonstrates Gimbal Lock) ---
+        // Pitch: Up/Down
+        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS)    pitch += angle;
+        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS)  pitch -= angle;
+
+        // Roll: Left/Right
+        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS)  roll += angle;
+        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) roll -= angle;
+
+        // Yaw: Q/E
+        if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS)     yaw += angle;
+        if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS)     yaw -= angle;
     }
 
-    //camera controls 
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        camera.ProcessKeyboard(FORWARD, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        camera.ProcessKeyboard(BACKWARD, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        camera.ProcessKeyboard(LEFT, deltaTime);
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        camera.ProcessKeyboard(RIGHT, deltaTime);
+    // --- BASIC WASD CAMERA FUNCTIONALITY ---
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) camera.ProcessKeyboard(FORWARD, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) camera.ProcessKeyboard(BACKWARD, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) camera.ProcessKeyboard(LEFT, deltaTime);
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) camera.ProcessKeyboard(RIGHT, deltaTime);
+
+    // Reset R key
+    if (glfwGetKey(window, GLFW_KEY_R) == GLFW_PRESS) {
+        pitch = 0.0f; yaw = 0.0f; roll = 0.0f;
+        planeOrientation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+    }
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
